@@ -1,5 +1,5 @@
 @echo off
-echo Starting NASA App Backend (FastAPI + xarray)
+echo Starting ForeTrip Backend (FastAPI + xarray)
 echo.
 echo Starting server at http://localhost:8000
 echo.

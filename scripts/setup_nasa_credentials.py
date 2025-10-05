@@ -25,7 +25,7 @@ NASA_USERNAME={username}
 NASA_PASSWORD={password}
 
 # Optional: Custom User Agent for requests
-NASA_USER_AGENT=nasa-app-fastapi/1.0
+NASA_USER_AGENT=foretrip-fastapi/1.0
 
 # GES DISC Base URLs
 GES_DISC_BASE_URL=https://disc2.gesdisc.eosdis.nasa.gov/data

@@ -21,7 +21,7 @@ This guide explains how to securely access NASA GES DISC data using FastAPI and 
    ```env
    NASA_USERNAME=your_username
    NASA_PASSWORD=your_password
-   NASA_USER_AGENT=nasa-app-fastapi/1.0
+   NASA_USER_AGENT=foretrip-fastapi/1.0
    ```
 
 ### Method 2: .netrc File

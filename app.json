@@ -1,12 +1,12 @@
 {
   "expo": {
-    "name": "NASA Weather App",
-    "slug": "nasa-weather-app",
+    "name": "ForeTrip",
+    "slug": "foretrip",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -15,8 +15,11 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "This app needs location access to provide weather information for your current location.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app needs location access to provide weather information for your current location."
+        "NSLocationWhenInUseUsageDescription": "ForeTrip needs location access to provide weather information and trip planning for your current location.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "ForeTrip needs location access to provide weather information and trip planning for your current location."
+      },
+      "config": {
+        "googleMapsApiKey": "YOUR_GOOGLE_MAPS_API_KEY"
       }
     },
     "android": {
@@ -28,7 +31,12 @@
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION"
-      ]
+      ],
+      "config": {
+        "googleMaps": {
+          "apiKey": "YOUR_GOOGLE_MAPS_API_KEY"
+        }
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -37,7 +45,7 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Allow $(PRODUCT_NAME) to use your location for accurate weather data."
+          "locationAlwaysAndWhenInUsePermission": "Allow ForeTrip to use your location for accurate weather data and trip planning."
         }
       ]
     ]

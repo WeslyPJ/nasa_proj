@@ -1,5 +1,5 @@
 // API Configuration
-export const API_BASE_URL = 'http://localhost:8001';
+export const API_BASE_URL = 'http://172.30.3.32:8001';
 
 // Popular tourist destinations with coordinates
 export const POPULAR_LOCATIONS = [

@@ -13,7 +13,7 @@ import requests
 from requests.auth import HTTPBasicAuth
 import aiohttp
 import asyncio
-from .credentials import nasa_creds
+from credentials import nasa_creds
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

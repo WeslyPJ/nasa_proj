@@ -1,5 +1,5 @@
 {
-  "name": "nasa-app",
+  "name": "foretrip",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
@@ -12,15 +12,13 @@
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native-community/slider": "^5.0.1",
     "expo": "~54.0.12",
-    "expo-location": "^19.0.7",
+    "expo-location": "~19.0.7",
     "expo-status-bar": "~3.0.8",
     "react": "19.1.0",
     "react-native": "0.81.4",
     "react-native-animatable": "^1.4.0",
-    "react-native-geolocation-service": "^5.3.1",
     "react-native-linear-gradient": "^2.8.3",
-    "react-native-maps": "^1.26.14",
-    "react-native-vector-icons": "^10.3.0"
+    "react-native-maps": "1.20.1"
   },
   "private": true
 }

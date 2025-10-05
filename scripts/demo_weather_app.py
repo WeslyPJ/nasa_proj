@@ -1,5 +1,5 @@
 """
-NASA Weather App Demo Script
+ForeTrip Demo Script
 Demonstrates the weather app capabilities with sample API calls
 """
 
@@ -53,7 +53,7 @@ def test_weather_for_location(lat, lon, name):
         return False
 
 def main():
-    print("🚀 NASA Weather App Demo")
+    print("🚀 ForeTrip Demo")
     print("=" * 60)
     print(f"🕐 Demo started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"🔗 API Base URL: {API_BASE_URL}")

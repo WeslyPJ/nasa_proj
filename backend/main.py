@@ -8,20 +8,21 @@ import json
 import asyncio
 import sys
 import os
+import logging
 from datetime import datetime
 import logging
 
 # Add the parent directory to sys.path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.credentials import nasa_creds
-from backend.nasa_data import nasa_data
+from credentials import nasa_creds
+from nasa_data import nasa_data
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="NASA App API", description="FastAPI backend with xarray support")
+app = FastAPI(title="ForeTrip API", description="FastAPI backend for ForeTrip weather app")
 
 # Enable CORS for Expo app
 app.add_middleware(
@@ -34,7 +35,7 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    return {"message": "NASA App API with FastAPI and xarray"}
+    return {"message": "ForeTrip API with FastAPI and xarray"}
 
 @app.get("/health")
 async def health_check():

@@ -1,76 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  ScrollView,
-  Dimensions,
-  StatusBar,
-  Alert,
-  ActivityIndicator,
-  Platform
-} from 'react-native';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
-import Geolocation from 'react-native-geolocation-service';
-import LinearGradient from 'react-native-linear-gradient';
-import * as Animatable from 'react-native-animatable';
-import Icon from 'react-native-vector-icons/MaterialIcons';
-import { requestLocationPermission, locationPermissionConfig } from './locationUtils';
-
-const { width, height } = Dimensions.get('window');
-const API_BASE_URL = 'http://localhost:8001';
-
-// Popular tourist spots with coordinates
-const POPULAR_LOCATIONS = [
-  { name: 'New York City', lat: 40.7128, lon: -74.0060, country: 'USA' },
-  { name: 'London', lat: 51.5074, lon: -0.1278, country: 'UK' },
-  { name: 'Paris', lat: 48.8566, lon: 2.3522, country: 'France' },
-  { name: 'Tokyo', lat: 35.6762, lon: 139.6503, country: 'Japan' },
-  { name: 'Sydney', lat: -33.8688, lon: 151.2093, country: 'Australia' },
-  { name: 'Dubai', lat: 25.2048, lon: 55.2708, country: 'UAE' },
-  { name: 'Rome', lat: 41.9028, lon: 12.4964, country: 'Italy' },
-  { name: 'Barcelona', lat: 41.3851, lon: 2.1734, country: 'Spain' },
-  { name: 'Bangkok', lat: 13.7563, lon: 100.5018, country: 'Thailand' },
-  { name: 'Miami', lat: 25.7617, lon: -80.1918, country: 'USA' },
-  { name: 'Los Angeles', lat: 34.0522, lon: -118.2437, country: 'USA' },
-  { name: 'Singapore', lat: 1.3521, lon: 103.8198, country: 'Singapore' },
-];
-
-// Weather condition animations and colors
-const WEATHER_CONDITIONS = {
-  clear: { 
-    colors: ['#87CEEB', '#4169E1'], 
-    animation: 'pulse',
-    icon: 'wb-sunny',
-    description: 'Clear skies'
-  },
-  rain: { 
-    colors: ['#4682B4', '#2F4F4F'], 
-    animation: 'bounce',
-    icon: 'grain',
-    description: 'Rainy weather'
-  },
-  cloudy: { 
-    colors: ['#708090', '#2F4F4F'], 
-    animation: 'fadeIn',
-    icon: 'cloud',
-    description: 'Cloudy skies'
-  },
-  hot: { 
-    colors: ['#FF6347', '#FF4500'], 
-    animation: 'flash',
-    icon: 'wb-sunny',
-    description: 'Hot weather'
-  },
-  cold: { 
-    colors: ['#4169E1', '#191970'], 
-    animation: 'pulse',
-    icon: 'ac-unit',
-    description: 'Cold weather'
-  }
-};
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { View, StatusBar, Alert, TouchableOpacity, Text } from 'react-native';
+import { WeatherCard, LocationSearch, LoadingScreen, NASAMapView, CompactSearchBar } from './src/components';
+import { fetchWeatherData } from './src/utils/apiUtils';
+import { POPULAR_LOCATIONS } from './src/constants';
+import { weatherStyles, fabStyles } from './src/styles';
+import * as Location from 'expo-location';
 
 const WeatherApp = () => {
   const [region, setRegion] = useState({
@@ -80,14 +14,170 @@ const WeatherApp = () => {
     longitudeDelta: 0.0421,
   });
   
-  const [searchQuery, setSearchQuery] = useState('');
   const [selectedLocation, setSelectedLocation] = useState(null);
   const [weatherData, setWeatherData] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [showSearchResults, setShowSearchResults] = useState(false);
-  const [searchResults, setSearchResults] = useState([]);
+  const [error, setError] = useState(null);
+  const [showLocationSearch, setShowLocationSearch] = useState(false);
+  const [showSearchBar, setShowSearchBar] = useState(false);
   const [currentUserLocation, setCurrentUserLocation] = useState(null);
+  const [initializing, setInitializing] = useState(true);
+  const [mapType, setMapType] = useState('satellite');
   const mapRef = useRef(null);
+  const regionUpdateTimeoutRef = useRef(null);
+  const lastWeatherFetchRef = useRef(null);
+  const locationWatchRef = useRef(null);
+  const mapRegionDelayRef = useRef(null);
+
+  // Enhanced zoom levels based on location type
+  const getZoomLevel = (locationType) => {
+    const zoomLevels = {
+      'street_address': { latitudeDelta: 0.002, longitudeDelta: 0.002 }, // Very close
+      'route': { latitudeDelta: 0.005, longitudeDelta: 0.005 }, // Street level
+      'neighborhood': { latitudeDelta: 0.01, longitudeDelta: 0.01 }, // Neighborhood
+      'locality': { latitudeDelta: 0.02, longitudeDelta: 0.02 }, // City level
+      'administrative_area_level_3': { latitudeDelta: 0.05, longitudeDelta: 0.05 }, // County
+      'administrative_area_level_2': { latitudeDelta: 0.1, longitudeDelta: 0.1 }, // State/Province
+      'administrative_area_level_1': { latitudeDelta: 0.2, longitudeDelta: 0.2 }, // Region
+      'country': { latitudeDelta: 2.0, longitudeDelta: 2.0 }, // Country level
+      'default': { latitudeDelta: 0.0922, longitudeDelta: 0.0421 } // Default zoom
+    };
+    
+    return zoomLevels[locationType] || zoomLevels.default;
+  };
+
+  // Enhanced auto-zoom function with smooth animation
+  const autoZoomToLocation = async (latitude, longitude, locationType = 'default', animationDuration = 1500) => {
+    const zoomLevel = getZoomLevel(locationType);
+    const newRegion = {
+      latitude: parseFloat(latitude),
+      longitude: parseFloat(longitude),
+      ...zoomLevel,
+    };
+    
+    console.log(`Auto-zooming to ${locationType} with zoom level:`, zoomLevel);
+    
+    // Animate to region with specified duration
+    if (mapRef.current) {
+      mapRef.current.animateToRegion(newRegion, animationDuration);
+      setRegion(newRegion);
+    }
+    
+    return newRegion;
+  };
+
+  // Enhanced debounced region change handler with configurable delay
+  const handleRegionChange = useCallback((newRegion) => {
+    setRegion(newRegion);
+    
+    // Clear existing timeout
+    if (regionUpdateTimeoutRef.current) {
+      clearTimeout(regionUpdateTimeoutRef.current);
+    }
+    
+    // Clear map region delay timeout
+    if (mapRegionDelayRef.current) {
+      clearTimeout(mapRegionDelayRef.current);
+    }
+
+    // Set timeout for map region data fetch (3 seconds for user interaction)
+    mapRegionDelayRef.current = setTimeout(() => {
+      const now = Date.now();
+      // Only fetch weather if it's been more than 3 seconds since last fetch
+      if (!lastWeatherFetchRef.current || (now - lastWeatherFetchRef.current) > 3000) {
+        console.log('Fetching weather for map region after 3-second delay');
+        lastWeatherFetchRef.current = now;
+        handleFetchWeatherData(newRegion.latitude, newRegion.longitude, 'Map Region');
+      }
+    }, 3000); // 3-second delay for map region changes
+    
+    // Also set the original timeout for location updates (2 seconds)
+    regionUpdateTimeoutRef.current = setTimeout(() => {
+      const now = Date.now();
+      if (!lastWeatherFetchRef.current || (now - lastWeatherFetchRef.current) > 2000) {
+        console.log('Fetching weather for location update after 2-second delay');
+        lastWeatherFetchRef.current = now;
+        handleFetchWeatherData(newRegion.latitude, newRegion.longitude, 'Location Update');
+      }
+    }, 2000); // 2-second delay for location updates
+  }, []);
+
+  // Clean up timeout and location watch on unmount
+  useEffect(() => {
+    return () => {
+      if (regionUpdateTimeoutRef.current) {
+        clearTimeout(regionUpdateTimeoutRef.current);
+      }
+      if (mapRegionDelayRef.current) {
+        clearTimeout(mapRegionDelayRef.current);
+      }
+      if (locationWatchRef.current) {
+        locationWatchRef.current.remove();
+      }
+    };
+  }, []);
+
+  // Start watching location with 2-second intervals
+  const startLocationWatch = async () => {
+    try {
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') return;
+
+      // Stop any existing watch
+      if (locationWatchRef.current) {
+        locationWatchRef.current.remove();
+      }
+
+      locationWatchRef.current = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.High,
+          timeInterval: 2000, // Update every 2 seconds
+          distanceInterval: 10, // Only if moved more than 10 meters
+        },
+        (newLocation) => {
+          const { latitude, longitude } = newLocation.coords;
+          
+          // Only update if position has changed significantly
+          if (currentUserLocation) {
+            const distance = getDistance(
+              { latitude: currentUserLocation.latitude, longitude: currentUserLocation.longitude },
+              { latitude, longitude }
+            );
+            
+            // Only update if moved more than 50 meters
+            if (distance < 50) return;
+          }
+
+          console.log('Location updated:', latitude, longitude);
+          setCurrentUserLocation({ latitude, longitude });
+          
+          // Update region with 2-second delay mechanism
+          const newRegion = {
+            latitude,
+            longitude,
+            latitudeDelta: 0.0922,
+            longitudeDelta: 0.0421,
+          };
+          
+          handleRegionChange(newRegion);
+        }
+      );
+    } catch (error) {
+      console.log('Location watch error:', error);
+    }
+  };
+
+  // Calculate distance between two coordinates (in meters)
+  const getDistance = (from, to) => {
+    const R = 6371000; // Earth's radius in meters
+    const dLat = (to.latitude - from.latitude) * Math.PI / 180;
+    const dLon = (to.longitude - from.longitude) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(from.latitude * Math.PI / 180) * Math.cos(to.latitude * Math.PI / 180) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  };
 
   // Get user's current location on app start
   useEffect(() => {
@@ -95,115 +185,100 @@ const WeatherApp = () => {
   }, []);
 
   const getCurrentLocation = async () => {
-    const hasPermission = await requestLocationPermission();
-    
-    if (!hasPermission) {
-      return;
+    try {
+      // Request location permissions
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      
+      if (status !== 'granted') {
+        setInitializing(false);
+        Alert.alert(
+          'Permission Required',
+          'Location permission is required to show weather for your current location. You can still search for other locations.'
+        );
+        return;
+      }
+
+      // Get initial current location with timeout
+      let location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+        maximumAge: 10000,
+        timeout: 15000, // 15 second timeout
+      });
+
+      const { latitude, longitude } = location.coords;
+      setCurrentUserLocation({ latitude, longitude });
+      
+      // Auto-zoom to current location with city-level zoom
+      await autoZoomToLocation(latitude, longitude, 'locality', 2000);
+      
+      // Fetch weather for current location (initial load, no timeout)
+      lastWeatherFetchRef.current = Date.now();
+      handleFetchWeatherData(latitude, longitude, 'Your Location');
+      
+      // Start watching location with 2-second intervals
+      startLocationWatch();
+      
+      setInitializing(false);
+    } catch (error) {
+      console.log('Location error:', error);
+      setInitializing(false);
+      Alert.alert('Location Error', 'Unable to get your current location. Please search for a location instead.');
     }
-
-    Geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude } = position.coords;
-        setCurrentUserLocation({ latitude, longitude });
-        setRegion({
-          latitude,
-          longitude,
-          latitudeDelta: 0.0922,
-          longitudeDelta: 0.0421,
-        });
-        mapRef.current?.animateToRegion({
-          latitude,
-          longitude,
-          latitudeDelta: 0.0922,
-          longitudeDelta: 0.0421,
-        });
-        
-        // Fetch weather for current location
-        fetchWeatherData(latitude, longitude, 'Your Location');
-      },
-      (error) => {
-        console.log('Location error:', error);
-        Alert.alert('Location Error', 'Unable to get your current location. Please search for a location instead.');
-      },
-      locationPermissionConfig
-    );
-  };
-
-  const searchLocations = (query) => {
-    const filtered = POPULAR_LOCATIONS.filter(location =>
-      location.name.toLowerCase().includes(query.toLowerCase()) ||
-      location.country.toLowerCase().includes(query.toLowerCase())
-    );
-    setSearchResults(filtered);
-    setShowSearchResults(filtered.length > 0);
   };
 
   const selectLocation = async (location) => {
     setSelectedLocation(location);
-    setSearchQuery(location.name);
-    setShowSearchResults(false);
+    setShowLocationSearch(false);
+    setShowSearchBar(false);
     
-    // Animate map to selected location
-    const newRegion = {
-      latitude: location.lat,
-      longitude: location.lon,
-      latitudeDelta: 0.0922,
-      longitudeDelta: 0.0421,
-    };
+    // Clear any pending region update timeouts
+    if (regionUpdateTimeoutRef.current) {
+      clearTimeout(regionUpdateTimeoutRef.current);
+    }
+    if (mapRegionDelayRef.current) {
+      clearTimeout(mapRegionDelayRef.current);
+    }
     
-    setRegion(newRegion);
-    mapRef.current?.animateToRegion(newRegion, 1000);
+    // Determine location type for appropriate zoom level
+    const locationType = location.type || 'locality';
     
-    // Fetch weather data
-    await fetchWeatherData(location.lat, location.lon, location.name);
+    // Auto-zoom to selected location with appropriate zoom level
+    await autoZoomToLocation(location.lat, location.lon, locationType, 1500);
+    
+    // Fetch weather data immediately for user-selected location
+    lastWeatherFetchRef.current = Date.now();
+    await handleFetchWeatherData(location.lat, location.lon, location.name);
   };
 
-  const fetchWeatherData = async (lat, lon, locationName) => {
+  const handleFetchWeatherData = async (lat, lon, locationName) => {
     setLoading(true);
+    setError(null);
     try {
-      // Use the new unified weather endpoint
-      const response = await fetch(`${API_BASE_URL}/weather?lat=${lat}&lon=${lon}&location_name=${encodeURIComponent(locationName)}`);
-      const weatherData = await response.json();
-
-      // Process the comprehensive weather data
-      const processedWeatherData = {
-        location: locationName,
-        coordinates: { lat, lon },
-        temperature: weatherData.current.temperature,
-        feelsLike: weatherData.current.temperature_feels_like,
-        precipitation: weatherData.current.precipitation,
-        precipitation24h: weatherData.current.precipitation_24h,
-        humidity: weatherData.current.humidity,
-        windSpeed: weatherData.current.wind_speed,
-        windDirection: weatherData.current.wind_direction,
-        cloudCover: weatherData.current.cloud_cover,
-        uvIndex: weatherData.current.uv_index,
-        visibility: weatherData.current.visibility,
-        pressure: weatherData.current.pressure,
-        condition: weatherData.current.condition,
-        lastUpdated: new Date().toLocaleTimeString(),
-        forecast: weatherData.forecast || [],
-        satellite: {
-          modis: weatherData.satellite_data.modis.available,
-          gpm: weatherData.satellite_data.gpm.available
-        }
+      const data = await fetchWeatherData(lat, lon, locationName);
+      // Add current time and date to weather data
+      const now = new Date();
+      const enhancedData = {
+        ...data,
+        currentTime: now.toLocaleTimeString('en-US', { 
+          hour: '2-digit', 
+          minute: '2-digit',
+          hour12: true 
+        }),
+        currentDate: now.toLocaleDateString('en-US', { 
+          weekday: 'long',
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        }),
+        lastUpdated: now.toLocaleTimeString()
       };
-
-      setWeatherData(processedWeatherData);
+      setWeatherData(enhancedData);
     } catch (error) {
       console.error('Weather fetch error:', error);
-      Alert.alert('Error', 'Failed to fetch weather data');
+      setError('Failed to fetch weather data. Please try again.');
     } finally {
       setLoading(false);
     }
-  };
-
-  const getWeatherCondition = (temperature, precipitation) => {
-    if (precipitation > 2) return 'rain';
-    if (temperature > 303) return 'hot'; // > 30°C
-    if (temperature < 283) return 'cold'; // < 10°C
-    if (Math.random() > 0.5) return 'cloudy';
-    return 'clear';
   };
 
   const onMapPress = async (event) => {
@@ -214,502 +289,209 @@ const WeatherApp = () => {
       lon: longitude
     };
     
-    setSelectedLocation(customLocation);
-    setSearchQuery(`${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+    // Clear any pending region update timeouts
+    if (regionUpdateTimeoutRef.current) {
+      clearTimeout(regionUpdateTimeoutRef.current);
+    }
+    if (mapRegionDelayRef.current) {
+      clearTimeout(mapRegionDelayRef.current);
+    }
     
-    await fetchWeatherData(latitude, longitude, 'Custom Location');
+    setSelectedLocation(customLocation);
+    
+    // Auto-zoom to tapped location with street level zoom
+    await autoZoomToLocation(latitude, longitude, 'route', 1200);
+    
+    // Fetch weather data immediately for user tap
+    lastWeatherFetchRef.current = Date.now();
+    await handleFetchWeatherData(latitude, longitude, 'Custom Location');
   };
 
-  const renderWeatherCard = () => {
-    if (!weatherData) return null;
-
-    const condition = WEATHER_CONDITIONS[weatherData.condition] || WEATHER_CONDITIONS.clear;
-
-    return (
-      <Animatable.View 
-        animation={condition.animation}
-        duration={2000}
-        iterationCount="infinite"
-        style={styles.weatherCard}
-      >
-        <LinearGradient
-          colors={condition.colors}
-          style={styles.weatherGradient}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-        >
-          <View style={styles.weatherHeader}>
-            <Text style={styles.locationName}>{weatherData.location}</Text>
-            <Text style={styles.lastUpdated}>Updated: {weatherData.lastUpdated}</Text>
-          </View>
-
-          <View style={styles.weatherMain}>
-            <View style={styles.temperatureSection}>
-              <Icon name={condition.icon} size={60} color="#FFFFFF" />
-              <Text style={styles.temperature}>{weatherData.temperature}°C</Text>
-            </View>
-            <Text style={styles.weatherDescription}>{condition.description}</Text>
-          </View>
-
-          <View style={styles.weatherDetails}>
-            <View style={styles.detailItem}>
-              <Icon name="opacity" size={20} color="#FFFFFF" />
-              <Text style={styles.detailText}>Precipitation</Text>
-              <Text style={styles.detailValue}>{weatherData.precipitation.toFixed(1)} mm</Text>
-            </View>
-            
-            <View style={styles.detailItem}>
-              <Icon name="water-drop" size={20} color="#FFFFFF" />
-              <Text style={styles.detailText}>Humidity</Text>
-              <Text style={styles.detailValue}>{weatherData.humidity}%</Text>
-            </View>
-            
-            <View style={styles.detailItem}>
-              <Icon name="air" size={20} color="#FFFFFF" />
-              <Text style={styles.detailText}>Wind</Text>
-              <Text style={styles.detailValue}>{weatherData.windSpeed} km/h</Text>
-            </View>
-          </View>
-
-          <View style={styles.additionalDetails}>
-            <View style={styles.detailRow}>
-              <View style={styles.detailItem}>
-                <Icon name="thermostat" size={16} color="#E0E0E0" />
-                <Text style={styles.smallDetailText}>Feels like {weatherData.feelsLike}°C</Text>
-              </View>
-              <View style={styles.detailItem}>
-                <Icon name="visibility" size={16} color="#E0E0E0" />
-                <Text style={styles.smallDetailText}>{weatherData.visibility} km</Text>
-              </View>
-            </View>
-            
-            <View style={styles.detailRow}>
-              <View style={styles.detailItem}>
-                <Icon name="compress" size={16} color="#E0E0E0" />
-                <Text style={styles.smallDetailText}>{weatherData.pressure} hPa</Text>
-              </View>
-              <View style={styles.detailItem}>
-                <Icon name="wb-sunny" size={16} color="#E0E0E0" />
-                <Text style={styles.smallDetailText}>UV {weatherData.uvIndex}</Text>
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.satelliteInfo}>
-            <Text style={styles.satelliteTitle}>NASA Satellite Data</Text>
-            <View style={styles.satelliteStatus}>
-              <View style={[styles.statusDot, { backgroundColor: weatherData.satellite.modis ? '#4CAF50' : '#F44336' }]} />
-              <Text style={styles.satelliteText}>MODIS: {weatherData.satellite.modis ? 'Active' : 'Offline'}</Text>
-            </View>
-            <View style={styles.satelliteStatus}>
-              <View style={[styles.statusDot, { backgroundColor: weatherData.satellite.gpm ? '#4CAF50' : '#F44336' }]} />
-              <Text style={styles.satelliteText}>GPM: {weatherData.satellite.gpm ? 'Active' : 'Offline'}</Text>
-            </View>
-          </View>
-        </LinearGradient>
-      </Animatable.View>
-    );
+  const handleCurrentLocationPress = () => {
+    setShowLocationSearch(false);
+    setShowSearchBar(false);
+    
+    // Clear any pending region update timeouts
+    if (regionUpdateTimeoutRef.current) {
+      clearTimeout(regionUpdateTimeoutRef.current);
+    }
+    if (mapRegionDelayRef.current) {
+      clearTimeout(mapRegionDelayRef.current);
+    }
+    
+    getCurrentLocation();
   };
+
+  const toggleMapType = () => {
+    setMapType(prev => prev === 'satellite' ? 'standard' : 'satellite');
+  };
+
+  // Handle search result selection
+  const handleSearchLocationSelect = async (location) => {
+    const searchLocation = {
+      name: location.name || location.address,
+      lat: location.latitude,
+      lon: location.longitude,
+      type: location.type
+    };
+    
+    setSelectedLocation(searchLocation);
+    setShowSearchBar(false);
+    
+    // Clear any pending timeouts
+    if (regionUpdateTimeoutRef.current) {
+      clearTimeout(regionUpdateTimeoutRef.current);
+    }
+    if (mapRegionDelayRef.current) {
+      clearTimeout(mapRegionDelayRef.current);
+    }
+    
+    // Determine appropriate zoom level based on location type
+    const locationType = location.type || 'locality';
+    console.log('Search location type:', locationType);
+    
+    // Auto-zoom to selected location with enhanced zoom
+    await autoZoomToLocation(location.latitude, location.longitude, locationType, 1800);
+    
+    // Fetch weather data immediately for search result
+    lastWeatherFetchRef.current = Date.now();
+    await handleFetchWeatherData(location.latitude, location.longitude, location.name || location.address);
+  };
+
+  // Create markers for map
+  const createMapMarkers = () => {
+    const markers = [];
+    
+    // Add selected location marker if exists
+    if (selectedLocation) {
+      markers.push({
+        coordinate: { latitude: selectedLocation.lat, longitude: selectedLocation.lon },
+        title: selectedLocation.name,
+        description: 'Selected Location',
+        key: 'selected',
+      });
+    }
+
+    // Add current location marker if available
+    if (currentUserLocation) {
+      markers.push({
+        coordinate: currentUserLocation,
+        title: 'Your Location',
+        description: 'Current position',
+        key: 'current-location',
+      });
+    }
+
+    return markers;
+  };
+
+  if (initializing) {
+    return <LoadingScreen message="Initializing ForeTrip..." />;
+  }
 
   return (
-    <View style={styles.container}>
-      <StatusBar backgroundColor="#2196F3" barStyle="light-content" />
+    <View style={weatherStyles.container} pointerEvents="box-none">
+      <StatusBar backgroundColor="#0A0E1A" barStyle="light-content" />
       
-      {/* Header with search */}
-      <View style={styles.header}>
-        <View style={styles.searchContainer}>
-          <Icon name="search" size={20} color="#666" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search for cities or tourist spots..."
-            value={searchQuery}
-            onChangeText={(text) => {
-              setSearchQuery(text);
-              if (text.length > 2) {
-                searchLocations(text);
-              } else {
-                setShowSearchResults(false);
-              }
-            }}
-            placeholderTextColor="#999"
-          />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => {
-              setSearchQuery('');
-              setShowSearchResults(false);
-            }}>
-              <Icon name="clear" size={20} color="#666" />
-            </TouchableOpacity>
-          )}
-        </View>
-
-        <TouchableOpacity style={styles.locationButton} onPress={getCurrentLocation}>
-          <Icon name="my-location" size={24} color="#2196F3" />
-        </TouchableOpacity>
-      </View>
-
-      {/* Search Results Dropdown */}
-      {showSearchResults && (
-        <Animatable.View animation="slideInDown" style={styles.searchResults}>
-          <ScrollView style={styles.searchResultsList}>
-            {searchResults.map((location, index) => (
-              <TouchableOpacity
-                key={index}
-                style={styles.searchResultItem}
-                onPress={() => selectLocation(location)}
-              >
-                <Icon name="place" size={20} color="#2196F3" />
-                <View style={styles.locationInfo}>
-                  <Text style={styles.locationName}>{location.name}</Text>
-                  <Text style={styles.locationCountry}>{location.country}</Text>
-                </View>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </Animatable.View>
-      )}
-
-      {/* Map */}
-      <MapView
+      <NASAMapView
         ref={mapRef}
-        provider={PROVIDER_GOOGLE}
-        style={styles.map}
         region={region}
+        onRegionChange={handleRegionChange}
         onPress={onMapPress}
-        showsUserLocation={true}
-        showsMyLocationButton={false}
-        mapType="standard"
-      >
-        {/* Popular locations markers */}
-        {POPULAR_LOCATIONS.map((location, index) => (
-          <Marker
-            key={index}
-            coordinate={{ latitude: location.lat, longitude: location.lon }}
-            title={location.name}
-            description={location.country}
-            onPress={() => selectLocation(location)}
-          >
-            <View style={styles.customMarker}>
-              <Icon name="place" size={30} color="#FF5722" />
-            </View>
-          </Marker>
-        ))}
+        markers={createMapMarkers()}
+        mapType={mapType}
+      />
 
-        {/* Selected location marker */}
-        {selectedLocation && (
-          <Marker
-            coordinate={{ latitude: selectedLocation.lat, longitude: selectedLocation.lon }}
-            title={selectedLocation.name}
-          >
-            <Animatable.View animation="bounce" iterationCount="infinite" style={styles.selectedMarker}>
-              <Icon name="location-on" size={40} color="#2196F3" />
-            </Animatable.View>
-          </Marker>
-        )}
-      </MapView>
+      <WeatherCard 
+        weatherData={weatherData}
+        loading={loading}
+        error={error}
+      />
 
-      {/* Loading overlay */}
-      {loading && (
-        <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color="#2196F3" />
-          <Text style={styles.loadingText}>Fetching NASA satellite data...</Text>
+      <CompactSearchBar
+        visible={showSearchBar}
+        onLocationSelect={handleSearchLocationSelect}
+        onClose={() => setShowSearchBar(false)}
+      />
+
+      {/* Unified Control Bar */}
+      {!showLocationSearch && !showSearchBar && (
+        <View style={{ 
+          position: 'absolute', 
+          bottom: 30, 
+          left: 20, 
+          right: 20,
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          backgroundColor: 'rgba(15, 25, 45, 0.9)',
+          borderRadius: 25,
+          paddingHorizontal: 15,
+          paddingVertical: 10,
+          borderWidth: 1,
+          borderColor: 'rgba(0, 212, 170, 0.3)',
+          shadowColor: '#00D4AA',
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.3,
+          shadowRadius: 8,
+          elevation: 8,
+        }} 
+        pointerEvents="box-none">
+          
+          {/* Map Type Toggle */}
+          <TouchableOpacity
+            style={{
+              backgroundColor: 'rgba(0, 212, 170, 0.2)',
+              borderRadius: 20,
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              borderWidth: 1,
+              borderColor: 'rgba(0, 212, 170, 0.5)',
+            }}
+            onPress={toggleMapType}
+          >
+            <Text style={{ color: '#00D4AA', fontSize: 12, fontWeight: '600' }}>
+              {mapType === 'satellite' ? '🛰️ Satellite' : '🗺️ Street'}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Search Button */}
+          <TouchableOpacity
+            style={{
+              backgroundColor: 'rgba(255, 230, 109, 0.2)',
+              borderRadius: 20,
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              borderWidth: 1,
+              borderColor: 'rgba(255, 230, 109, 0.5)',
+            }}
+            onPress={() => setShowSearchBar(true)}
+          >
+            <Text style={{ color: '#FFE66D', fontSize: 12, fontWeight: '600' }}>
+              🔍 Search
+            </Text>
+          </TouchableOpacity>
+
+          {/* Current Location Button */}
+          <TouchableOpacity
+            style={{
+              backgroundColor: 'rgba(255, 107, 107, 0.2)',
+              borderRadius: 20,
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              borderWidth: 1,
+              borderColor: 'rgba(255, 107, 107, 0.5)',
+            }}
+            onPress={handleCurrentLocationPress}
+          >
+            <Text style={{ color: '#FF6B6B', fontSize: 12, fontWeight: '600' }}>
+              📍 Location
+            </Text>
+          </TouchableOpacity>
         </View>
       )}
-
-      {/* Weather Card */}
-      {renderWeatherCard()}
-
-      {/* Popular Locations Bottom Sheet */}
-      <View style={styles.bottomSheet}>
-        <Text style={styles.bottomSheetTitle}>Popular Tourist Destinations</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.popularLocations}>
-          {POPULAR_LOCATIONS.slice(0, 6).map((location, index) => (
-            <TouchableOpacity
-              key={index}
-              style={styles.popularLocationCard}
-              onPress={() => selectLocation(location)}
-            >
-              <LinearGradient
-                colors={['#2196F3', '#21CBF3']}
-                style={styles.popularLocationGradient}
-              >
-                <Icon name="place" size={24} color="#FFFFFF" />
-                <Text style={styles.popularLocationName}>{location.name}</Text>
-                <Text style={styles.popularLocationCountry}>{location.country}</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F5F5F5',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'ios' ? 50 : 20,
-    paddingBottom: 10,
-    backgroundColor: '#FFFFFF',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    zIndex: 1000,
-  },
-  searchContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F5F5F5',
-    borderRadius: 25,
-    paddingHorizontal: 15,
-    marginRight: 10,
-  },
-  searchIcon: {
-    marginRight: 10,
-  },
-  searchInput: {
-    flex: 1,
-    height: 45,
-    fontSize: 16,
-    color: '#333',
-  },
-  locationButton: {
-    width: 45,
-    height: 45,
-    borderRadius: 22.5,
-    backgroundColor: '#F0F8FF',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  searchResults: {
-    position: 'absolute',
-    top: Platform.OS === 'ios' ? 100 : 80,
-    left: 16,
-    right: 16,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-    maxHeight: 200,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    zIndex: 2000,
-  },
-  searchResultsList: {
-    maxHeight: 200,
-  },
-  searchResultItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-  },
-  locationInfo: {
-    marginLeft: 15,
-    flex: 1,
-  },
-  locationName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-  },
-  locationCountry: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 2,
-  },
-  map: {
-    flex: 1,
-  },
-  customMarker: {
-    alignItems: 'center',
-  },
-  selectedMarker: {
-    alignItems: 'center',
-  },
-  loadingOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 3000,
-  },
-  loadingText: {
-    marginTop: 10,
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  weatherCard: {
-    position: 'absolute',
-    top: Platform.OS === 'ios' ? 120 : 100,
-    left: 16,
-    right: 16,
-    borderRadius: 20,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    zIndex: 1500,
-  },
-  weatherGradient: {
-    borderRadius: 20,
-    padding: 20,
-  },
-  weatherHeader: {
-    alignItems: 'center',
-    marginBottom: 15,
-  },
-  lastUpdated: {
-    color: '#E0E0E0',
-    fontSize: 12,
-    marginTop: 5,
-  },
-  weatherMain: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  temperatureSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  temperature: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginLeft: 15,
-  },
-  weatherDescription: {
-    fontSize: 18,
-    color: '#E0E0E0',
-    fontWeight: '500',
-  },
-  weatherDetails: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 15,
-  },
-  additionalDetails: {
-    marginBottom: 15,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  detailItem: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  detailText: {
-    color: '#E0E0E0',
-    fontSize: 12,
-    marginTop: 5,
-  },
-  detailValue: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-    marginTop: 2,
-  },
-  smallDetailText: {
-    color: '#E0E0E0',
-    fontSize: 11,
-    marginLeft: 4,
-  },
-  satelliteInfo: {
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.3)',
-    paddingTop: 15,
-  },
-  satelliteTitle: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: 10,
-  },
-  satelliteStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 5,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 8,
-  },
-  satelliteText: {
-    color: '#E0E0E0',
-    fontSize: 12,
-  },
-  bottomSheet: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-  },
-  bottomSheetTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 15,
-    textAlign: 'center',
-  },
-  popularLocations: {
-    flexDirection: 'row',
-  },
-  popularLocationCard: {
-    marginRight: 15,
-    borderRadius: 15,
-    overflow: 'hidden',
-  },
-  popularLocationGradient: {
-    width: 120,
-    height: 80,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 10,
-  },
-  popularLocationName: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginTop: 5,
-  },
-  popularLocationCountry: {
-    color: '#E0E0E0',
-    fontSize: 12,
-    textAlign: 'center',
-  },
-});
 
 export default WeatherApp;
