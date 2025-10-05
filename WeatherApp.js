@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, StatusBar, Alert, TouchableOpacity, Text } from 'react-native';
-import { WeatherCard, LocationSearch, LoadingScreen, NASAMapView, CompactSearchBar } from './src/components';
+import { WeatherCard, LocationSearch, LoadingScreen, NASAMapView, CompactSearchBar, NetworkStatus } from './src/components';
 import { fetchWeatherData } from './src/utils/apiUtils';
-import { POPULAR_LOCATIONS } from './src/constants';
+import { POPULAR_LOCATIONS, API_BASE_URL } from './src/constants';
 import { weatherStyles, fabStyles } from './src/styles';
 import * as Location from 'expo-location';
 
@@ -23,6 +23,7 @@ const WeatherApp = () => {
   const [currentUserLocation, setCurrentUserLocation] = useState(null);
   const [initializing, setInitializing] = useState(true);
   const [mapType, setMapType] = useState('satellite');
+  const [delayStatus, setDelayStatus] = useState({ mapRegion: false, location: false });
   const mapRef = useRef(null);
   const regionUpdateTimeoutRef = useRef(null);
   const lastWeatherFetchRef = useRef(null);
@@ -46,8 +47,8 @@ const WeatherApp = () => {
     return zoomLevels[locationType] || zoomLevels.default;
   };
 
-  // Enhanced auto-zoom function with smooth animation
-  const autoZoomToLocation = async (latitude, longitude, locationType = 'default', animationDuration = 1500) => {
+  // Enhanced auto-zoom function with immediate weather data fetch
+  const autoZoomToLocation = async (latitude, longitude, locationType = 'default', animationDuration = 1500, fetchWeather = true) => {
     const zoomLevel = getZoomLevel(locationType);
     const newRegion = {
       latitude: parseFloat(latitude),
@@ -57,49 +58,64 @@ const WeatherApp = () => {
     
     console.log(`Auto-zooming to ${locationType} with zoom level:`, zoomLevel);
     
+    // Show loading immediately if fetching weather
+    if (fetchWeather) {
+      setLoading(true);
+      setError(null);
+    }
+    
     // Animate to region with specified duration
     if (mapRef.current) {
       mapRef.current.animateToRegion(newRegion, animationDuration);
       setRegion(newRegion);
     }
     
+    // Immediately fetch weather data if requested
+    if (fetchWeather) {
+      console.log('Fetching weather data immediately after zoom');
+      lastWeatherFetchRef.current = Date.now();
+      await handleFetchWeatherData(latitude, longitude, 'Auto-Zoom Location');
+    }
+    
     return newRegion;
   };
 
-  // Enhanced debounced region change handler with configurable delay
+  // Enhanced debounced region change handler with zoom protection
   const handleRegionChange = useCallback((newRegion) => {
+    // Check if zoomed very close (potential drift zone)
+    const isVeryZoomed = newRegion.latitudeDelta < 0.001 || newRegion.longitudeDelta < 0.001;
+    
+    if (isVeryZoomed) {
+      console.log('🔍 Map is zoomed very close, reducing update frequency to prevent drift');
+      setRegion(newRegion); // Still update the region state but don't trigger weather updates
+      return;
+    }
+
     setRegion(newRegion);
     
-    // Clear existing timeout
+    // Clear existing timeouts
     if (regionUpdateTimeoutRef.current) {
       clearTimeout(regionUpdateTimeoutRef.current);
     }
-    
-    // Clear map region delay timeout
     if (mapRegionDelayRef.current) {
       clearTimeout(mapRegionDelayRef.current);
     }
 
-    // Set timeout for map region data fetch (3 seconds for user interaction)
+    // Show delay status
+    setDelayStatus({ mapRegion: true, location: true });
+
+    // Set timeout for map region data fetch (5 seconds for zoomed regions to reduce drift)
+    const delayTime = isVeryZoomed ? 8000 : 3000; // Longer delay when zoomed close
+    
     mapRegionDelayRef.current = setTimeout(() => {
       const now = Date.now();
-      // Only fetch weather if it's been more than 3 seconds since last fetch
-      if (!lastWeatherFetchRef.current || (now - lastWeatherFetchRef.current) > 3000) {
-        console.log('Fetching weather for map region after 3-second delay');
+      if (!lastWeatherFetchRef.current || (now - lastWeatherFetchRef.current) > delayTime) {
+        console.log(`Fetching weather for map region after ${delayTime/1000}-second delay`);
         lastWeatherFetchRef.current = now;
         handleFetchWeatherData(newRegion.latitude, newRegion.longitude, 'Map Region');
       }
-    }, 3000); // 3-second delay for map region changes
-    
-    // Also set the original timeout for location updates (2 seconds)
-    regionUpdateTimeoutRef.current = setTimeout(() => {
-      const now = Date.now();
-      if (!lastWeatherFetchRef.current || (now - lastWeatherFetchRef.current) > 2000) {
-        console.log('Fetching weather for location update after 2-second delay');
-        lastWeatherFetchRef.current = now;
-        handleFetchWeatherData(newRegion.latitude, newRegion.longitude, 'Location Update');
-      }
-    }, 2000); // 2-second delay for location updates
+      setDelayStatus(prev => ({ ...prev, mapRegion: false }));
+    }, delayTime);
   }, []);
 
   // Clean up timeout and location watch on unmount
@@ -117,7 +133,7 @@ const WeatherApp = () => {
     };
   }, []);
 
-  // Start watching location with 2-second intervals
+  // Start watching location with 2-second intervals (React Native compatible)
   const startLocationWatch = async () => {
     try {
       let { status } = await Location.requestForegroundPermissionsAsync();
@@ -131,8 +147,8 @@ const WeatherApp = () => {
       locationWatchRef.current = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.High,
-          timeInterval: 2000, // Update every 2 seconds
-          distanceInterval: 10, // Only if moved more than 10 meters
+          timeInterval: 2000,
+          distanceInterval: 10,
         },
         (newLocation) => {
           const { latitude, longitude } = newLocation.coords;
@@ -140,18 +156,17 @@ const WeatherApp = () => {
           // Only update if position has changed significantly
           if (currentUserLocation) {
             const distance = getDistance(
-              { latitude: currentUserLocation.latitude, longitude: currentUserLocation.longitude },
+              currentUserLocation,
               { latitude, longitude }
             );
             
-            // Only update if moved more than 50 meters
-            if (distance < 50) return;
+            if (distance < 50) return; // Less than 50 meters, ignore
           }
 
           console.log('Location updated:', latitude, longitude);
           setCurrentUserLocation({ latitude, longitude });
           
-          // Update region with 2-second delay mechanism
+          // Update region with delay mechanism
           const newRegion = {
             latitude,
             longitude,
@@ -181,8 +196,29 @@ const WeatherApp = () => {
 
   // Get user's current location on app start
   useEffect(() => {
+    // Check API connectivity first
+    checkApiConnectivity();
     getCurrentLocation();
   }, []);
+
+  // Check API connectivity
+  const checkApiConnectivity = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/`);
+      if (response.ok) {
+        console.log('✅ API connectivity check passed');
+      } else {
+        console.warn('⚠️ API returned non-OK status:', response.status);
+      }
+    } catch (error) {
+      console.error('❌ API connectivity check failed:', error);
+      Alert.alert(
+        'Backend Connection Issue',
+        `Cannot connect to the weather API backend. Please ensure the backend server is running on ${API_BASE_URL}.`,
+        [{ text: 'OK' }]
+      );
+    }
+  };
 
   const getCurrentLocation = async () => {
     try {
@@ -208,12 +244,8 @@ const WeatherApp = () => {
       const { latitude, longitude } = location.coords;
       setCurrentUserLocation({ latitude, longitude });
       
-      // Auto-zoom to current location with city-level zoom
-      await autoZoomToLocation(latitude, longitude, 'locality', 2000);
-      
-      // Fetch weather for current location (initial load, no timeout)
-      lastWeatherFetchRef.current = Date.now();
-      handleFetchWeatherData(latitude, longitude, 'Your Location');
+      // Auto-zoom to current location with city-level zoom and immediate weather fetch
+      await autoZoomToLocation(latitude, longitude, 'locality', 2000, true);
       
       // Start watching location with 2-second intervals
       startLocationWatch();
@@ -226,12 +258,9 @@ const WeatherApp = () => {
     }
   };
 
-  const selectLocation = async (location) => {
-    setSelectedLocation(location);
-    setShowLocationSearch(false);
-    setShowSearchBar(false);
-    
-    // Clear any pending region update timeouts
+  // Unified location selection handler
+  const selectLocationAndFetchWeather = async (lat, lon, name, locationType = 'locality', animationDuration = 1500) => {
+    // Clear any pending timeouts
     if (regionUpdateTimeoutRef.current) {
       clearTimeout(regionUpdateTimeoutRef.current);
     }
@@ -239,22 +268,32 @@ const WeatherApp = () => {
       clearTimeout(mapRegionDelayRef.current);
     }
     
-    // Determine location type for appropriate zoom level
+    // Reset delay status
+    setDelayStatus({ mapRegion: false, location: false });
+    
+    // Set selected location
+    setSelectedLocation({ name, lat, lon, type: locationType });
+    
+    // Auto-zoom and fetch weather immediately
+    await autoZoomToLocation(lat, lon, locationType, animationDuration, true);
+  };
+
+  const selectLocation = async (location) => {
+    setShowLocationSearch(false);
+    setShowSearchBar(false);
+    
     const locationType = location.type || 'locality';
-    
-    // Auto-zoom to selected location with appropriate zoom level
-    await autoZoomToLocation(location.lat, location.lon, locationType, 1500);
-    
-    // Fetch weather data immediately for user-selected location
-    lastWeatherFetchRef.current = Date.now();
-    await handleFetchWeatherData(location.lat, location.lon, location.name);
+    await selectLocationAndFetchWeather(location.lat, location.lon, location.name, locationType, 1500);
   };
 
   const handleFetchWeatherData = async (lat, lon, locationName) => {
     setLoading(true);
     setError(null);
     try {
+      console.log(`Fetching weather data for: ${locationName} (${lat}, ${lon})`);
       const data = await fetchWeatherData(lat, lon, locationName);
+      console.log('Weather data received:', data);
+      
       // Add current time and date to weather data
       const now = new Date();
       const enhancedData = {
@@ -273,9 +312,23 @@ const WeatherApp = () => {
         lastUpdated: now.toLocaleTimeString()
       };
       setWeatherData(enhancedData);
+      console.log('Weather data updated successfully');
     } catch (error) {
       console.error('Weather fetch error:', error);
-      setError('Failed to fetch weather data. Please try again.');
+      
+      // Provide more specific error messages
+      let errorMessage = 'Failed to fetch weather data. ';
+      if (error.message.includes('Failed to fetch')) {
+        errorMessage += `Network connection issue. Please check if the backend is running on ${API_BASE_URL}.`;
+      } else if (error.message.includes('HTTP error! status: 404')) {
+        errorMessage += 'Weather endpoint not found. Please check the API configuration.';
+      } else if (error.message.includes('HTTP error! status: 500')) {
+        errorMessage += 'Server error. Please check the backend logs.';
+      } else {
+        errorMessage += error.message || 'Please try again.';
+      }
+      
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -283,43 +336,28 @@ const WeatherApp = () => {
 
   const onMapPress = async (event) => {
     const { latitude, longitude } = event.nativeEvent.coordinate;
-    const customLocation = {
-      name: `Custom Location`,
-      lat: latitude,
-      lon: longitude
-    };
     
-    // Clear any pending region update timeouts
-    if (regionUpdateTimeoutRef.current) {
-      clearTimeout(regionUpdateTimeoutRef.current);
-    }
-    if (mapRegionDelayRef.current) {
-      clearTimeout(mapRegionDelayRef.current);
-    }
+    // Reset delay status
+    setDelayStatus({ mapRegion: false, location: false });
     
-    setSelectedLocation(customLocation);
-    
-    // Auto-zoom to tapped location with street level zoom
-    await autoZoomToLocation(latitude, longitude, 'route', 1200);
-    
-    // Fetch weather data immediately for user tap
-    lastWeatherFetchRef.current = Date.now();
-    await handleFetchWeatherData(latitude, longitude, 'Custom Location');
+    // Auto-zoom to tapped location with immediate weather fetch
+    await selectLocationAndFetchWeather(latitude, longitude, 'Custom Location', 'route', 1200);
   };
 
-  const handleCurrentLocationPress = () => {
+  const handleCurrentLocationPress = async () => {
     setShowLocationSearch(false);
     setShowSearchBar(false);
     
-    // Clear any pending region update timeouts
+    // Clear any pending timeouts and reset delay status
     if (regionUpdateTimeoutRef.current) {
       clearTimeout(regionUpdateTimeoutRef.current);
     }
     if (mapRegionDelayRef.current) {
       clearTimeout(mapRegionDelayRef.current);
     }
+    setDelayStatus({ mapRegion: false, location: false });
     
-    getCurrentLocation();
+    await getCurrentLocation();
   };
 
   const toggleMapType = () => {
@@ -328,34 +366,18 @@ const WeatherApp = () => {
 
   // Handle search result selection
   const handleSearchLocationSelect = async (location) => {
-    const searchLocation = {
-      name: location.name || location.address,
-      lat: location.latitude,
-      lon: location.longitude,
-      type: location.type
-    };
-    
-    setSelectedLocation(searchLocation);
     setShowSearchBar(false);
     
-    // Clear any pending timeouts
-    if (regionUpdateTimeoutRef.current) {
-      clearTimeout(regionUpdateTimeoutRef.current);
-    }
-    if (mapRegionDelayRef.current) {
-      clearTimeout(mapRegionDelayRef.current);
-    }
-    
-    // Determine appropriate zoom level based on location type
     const locationType = location.type || 'locality';
     console.log('Search location type:', locationType);
     
-    // Auto-zoom to selected location with enhanced zoom
-    await autoZoomToLocation(location.latitude, location.longitude, locationType, 1800);
-    
-    // Fetch weather data immediately for search result
-    lastWeatherFetchRef.current = Date.now();
-    await handleFetchWeatherData(location.latitude, location.longitude, location.name || location.address);
+    await selectLocationAndFetchWeather(
+      location.latitude, 
+      location.longitude, 
+      location.name || location.address, 
+      locationType, 
+      1800
+    );
   };
 
   // Create markers for map
@@ -413,6 +435,9 @@ const WeatherApp = () => {
         onLocationSelect={handleSearchLocationSelect}
         onClose={() => setShowSearchBar(false)}
       />
+
+      {/* Network Status Indicator */}
+      <NetworkStatus />
 
       {/* Unified Control Bar */}
       {!showLocationSearch && !showSearchBar && (

@@ -1,5 +1,7 @@
 // API Configuration
-export const API_BASE_URL = 'http://172.30.3.32:8001';
+// Using computer's IP address for mobile device access
+// Change back to 'http://localhost:8001' for web testing
+export const API_BASE_URL = 'http://10.115.223.125:8001';
 
 // Popular tourist destinations with coordinates
 export const POPULAR_LOCATIONS = [

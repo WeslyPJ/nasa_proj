@@ -54,10 +54,15 @@ const WeatherCard = ({ weatherData, loading, error }) => {
 
   if (loading) {
     return (
-      <View style={[weatherStyles.floatingCard, { height: 80 }]}>
-        <ActivityIndicator size="small" color="#00D4AA" />
-        <Text style={[weatherStyles.loadingText, { fontSize: 12, marginTop: 8 }]}>
-          🛰️ Loading weather...
+      <View style={[weatherStyles.floatingCard, { height: 100, alignItems: 'center', justifyContent: 'center' }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5 }}>
+          <ActivityIndicator size="small" color="#00D4AA" style={{ marginRight: 8 }} />
+          <Text style={[weatherStyles.loadingText, { fontSize: 12, color: '#00D4AA', fontWeight: '600' }]}>
+            ⚡ Updating Weather...
+          </Text>
+        </View>
+        <Text style={[weatherStyles.loadingText, { fontSize: 10, color: '#A0A0A0', textAlign: 'center' }]}>
+          Fetching NASA satellite data
         </Text>
       </View>
     );

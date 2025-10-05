@@ -190,30 +190,6 @@ const SearchBar = ({ visible, onLocationSelect, onClose }) => {
           <Text style={{ color: '#FF6B6B', fontSize: 16, fontWeight: '600' }}>
             🚫 No locations found
           </Text>
-          <Text style={{ color: '#A0A0A0', fontSize: 14, marginTop: 5, textAlign: 'center' }}>
-            Try searching for cities, landmarks, or addresses
-          </Text>
-        </View>
-      )}
-
-      {/* Search Tips */}
-      {!showResults && searchQuery.length === 0 && (
-        <View style={{
-          padding: 15,
-          backgroundColor: 'rgba(0, 212, 170, 0.1)',
-          borderRadius: 15,
-          borderWidth: 1,
-          borderColor: 'rgba(0, 212, 170, 0.2)'
-        }}>
-          <Text style={{ color: '#00D4AA', fontSize: 14, fontWeight: '600', marginBottom: 8 }}>
-            💡 Search Tips:
-          </Text>
-          <Text style={{ color: '#ffffff', fontSize: 12, lineHeight: 18 }}>
-            • Type city names: "New York", "London", "Tokyo"{'\n'}
-            • Search landmarks: "Eiffel Tower", "Golden Gate Bridge"{'\n'}
-            • Find addresses: "Times Square", "Central Park"{'\n'}
-            • Explore places: "Mount Everest", "Grand Canyon"
-          </Text>
         </View>
       )}
     </View>

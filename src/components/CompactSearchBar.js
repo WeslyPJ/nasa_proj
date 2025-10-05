@@ -34,28 +34,26 @@ const CompactSearchBar = ({ visible, onLocationSelect, onClose }) => {
   const searchTimeoutRef = useRef(null);
   const abortControllerRef = useRef(null);
 
-  if (!visible) return null;
-
-  // Google Geocoding API function with enhanced location types
+  // Google Geocoding API function with enhanced error handling
   const searchGooglePlaces = async (query) => {
     try {
       // You can replace this with your Google API key
       const GOOGLE_API_KEY = 'YOUR_GOOGLE_API_KEY';
       
-      // Using Google Places API Text Search
-      const response = await fetch(
-        `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(query)}&key=${GOOGLE_API_KEY}`,
-        {
-          signal: abortControllerRef.current?.signal,
-          headers: {
-            'User-Agent': 'ForeTrip/1.0'
-          }
-        }
-      );
+      const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(query)}&key=${GOOGLE_API_KEY}`;
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'ForeTrip/1.0'
+        },
+        signal: abortControllerRef.current?.signal,
+      });
 
       if (response.ok) {
         const data = await response.json();
-        return data.results.map(item => {
+        return data.results?.map(item => {
           // Map Google Place types to our zoom levels
           const getPrimaryType = (types) => {
             const typeMapping = {
@@ -73,28 +71,27 @@ const CompactSearchBar = ({ visible, onLocationSelect, onClose }) => {
               'tourist_attraction': 'route'
             };
             
-            // Find the most specific type available
-            for (const type of types) {
+            for (const type of types || []) {
               if (typeMapping[type]) {
                 return typeMapping[type];
               }
             }
-            return 'locality'; // Default to city level
+            return 'locality';
           };
 
           return {
             id: item.place_id,
             place_id: item.place_id,
-            lat: item.geometry.location.lat.toString(),
-            lon: item.geometry.location.lng.toString(),
-            display_name: item.formatted_address,
+            lat: item.geometry?.location?.lat?.toString() || '0',
+            lon: item.geometry?.location?.lng?.toString() || '0',
+            display_name: item.formatted_address || item.name,
             name: item.name,
             type: getPrimaryType(item.types),
             originalTypes: item.types,
             rating: item.rating,
             user_ratings_total: item.user_ratings_total
           };
-        });
+        }) || [];
       } else {
         throw new Error(`Google API Error: ${response.status}`);
       }
@@ -104,22 +101,23 @@ const CompactSearchBar = ({ visible, onLocationSelect, onClose }) => {
     }
   };
 
-  // OpenStreetMap Nominatim fallback with enhanced location types
+  // OpenStreetMap Nominatim fallback with better error handling
   const searchNominatim = async (query) => {
     try {
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=8&addressdetails=1`,
-        { 
-          signal: abortControllerRef.current?.signal,
-          headers: {
-            'User-Agent': 'ForeTrip/1.0'
-          }
-        }
-      );
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=8&addressdetails=1`;
+      
+      const response = await fetch(url, { 
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'ForeTrip/1.0'
+        },
+        signal: abortControllerRef.current?.signal,
+      });
       
       if (response.ok) {
         const data = await response.json();
-        return data.map(item => {
+        return data?.map(item => {
           // Map OSM types to our zoom levels
           const mapOSMType = (osmType, osmClass) => {
             const typeMapping = {
@@ -151,7 +149,7 @@ const CompactSearchBar = ({ visible, onLocationSelect, onClose }) => {
             originalType: item.type,
             originalClass: item.class
           };
-        });
+        }) || [];
       } else {
         throw new Error(`Nominatim Error: ${response.status}`);
       }
@@ -374,7 +372,7 @@ const CompactSearchBar = ({ visible, onLocationSelect, onClose }) => {
     };
   }, []);
 
-  return (
+  return visible ? (
     <View style={{
       position: 'absolute',
       top: 120, // Below compact weather card
@@ -406,7 +404,7 @@ const CompactSearchBar = ({ visible, onLocationSelect, onClose }) => {
             color: '#FFFFFF',
             fontSize: 14,
           }}
-          placeholder={useLocalSearch ? "🔍 Search popular places..." : "🔍 Search places (2s delay)..."}
+          placeholder={useLocalSearch ? "🔍 Search popular places..." : "🔍 Search places..."}
           placeholderTextColor="rgba(255, 255, 255, 0.6)"
           value={searchQuery}
           onChangeText={handleSearch}
@@ -553,64 +551,12 @@ const CompactSearchBar = ({ visible, onLocationSelect, onClose }) => {
           <Text style={{ color: '#FF6B6B', fontSize: 14, fontWeight: '600' }}>
             🚫 No locations found
           </Text>
-          <Text style={{ color: '#A0A0A0', fontSize: 12, marginTop: 5, textAlign: 'center' }}>
-            {useLocalSearch ? 'Try searching for popular cities' : 'Try searching for cities, landmarks, or addresses'}
-          </Text>
-          {!useLocalSearch && (
-            <TouchableOpacity
-              style={{
-                marginTop: 8,
-                padding: 8,
-                backgroundColor: 'rgba(0, 212, 170, 0.2)',
-                borderRadius: 10,
-              }}
-              onPress={() => {
-                setUseLocalSearch(true);
-                searchLocation(searchQuery);
-              }}
-            >
-              <Text style={{ color: '#00D4AA', fontSize: 12 }}>
-                📱 Search offline
-              </Text>
-            </TouchableOpacity>
-          )}
         </View>
       )}
 
       {/* Network Status and Search Method Indicator */}
-      {useLocalSearch && (
-        <View style={{
-          backgroundColor: 'rgba(255, 107, 107, 0.1)',
-          marginTop: 5,
-          borderRadius: 10,
-          padding: 8,
-          borderWidth: 1,
-          borderColor: 'rgba(255, 107, 107, 0.3)',
-          alignItems: 'center',
-        }}>
-          <Text style={{ color: '#FF6B6B', fontSize: 11, textAlign: 'center' }}>
-            📶 Offline mode - Popular destinations only
-          </Text>
-        </View>
-      )}
-
-      {!useLocalSearch && searchQuery.length >= 2 && (
-        <View style={{
-          backgroundColor: 'rgba(0, 212, 170, 0.1)',
-          marginTop: 5,
-          borderRadius: 10,
-          padding: 6,
-          borderWidth: 1,
-          borderColor: 'rgba(0, 212, 170, 0.3)',
-          alignItems: 'center',
-        }}>
-          <Text style={{ color: '#00D4AA', fontSize: 11, textAlign: 'center' }}>
-            🌐 Searching globally with 2-second delay...
-          </Text>
-        </View>
-      )}
     </View>
-  );
+  ) : null;
 };
 
 export default CompactSearchBar;

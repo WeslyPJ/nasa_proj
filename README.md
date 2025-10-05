@@ -1,98 +1,30 @@
 # 🌍 ForeTrip
 
-A comprehensive weather and trip planning application that integrates real NASA satellite data with a beautiful Google Maps-style mobile interface. Built with React Native + Expo frontend and FastAPI + Python backend.
+A weather application that integrates NASA satellite data with an interactive map interface.
 
 ## ✨ Features
 
-- **Real NASA Satellite Data**: Integration with MODIS temperature and GPM precipitation data via OPeNDAP
-- **Google Maps Style UI**: Dark themed, modern interface inspired by Google Maps
-- **Interactive Map**: Touch anywhere on the map to get weather data for that location
-- **Popular Destinations**: Pre-loaded with 12 popular tourist destinations worldwide
-- **Real-time Location**: Use your current GPS location for local weather
-- **Comprehensive Weather Data**: Temperature, precipitation, humidity, wind, pressure, UV index, and more
-- **Secure Authentication**: NASA Earthdata credentials managed securely via .env and .netrc
+- **Real NASA Satellite Data**: MODIS temperature and GPM precipitation data
+- **Interactive Map**: Touch anywhere on the map to get weather data
+- **Popular Destinations**: Pre-loaded tourist destinations worldwide
+- **Real-time Location**: GPS location for local weather
+- **Comprehensive Weather Data**: Temperature, precipitation, humidity, wind, pressure, UV index
 
 ## 🏗️ Project Structure
 
 ```
-nasa-app/ → foretrip/
-├── src/                      # Organized source code
-│   ├── components/          # Reusable React Native components
-│   │   ├── WeatherCard.js   # Weather information display
-│   │   ├── LocationSearch.js # Location selection interface
-│   │   ├── LoadingScreen.js # Loading state component
-│   │   ├── MapView.js       # Custom map component
-│   │   └── index.js         # Component exports
+nasa-app/
+├── src/                      # Source code
+│   ├── components/          # React Native components
 │   ├── constants/           # App constants and configuration
-│   │   └── index.js         # Popular locations, weather conditions, API URLs
-│   ├── styles/              # Centralized styling
-│   │   ├── index.js         # Main stylesheet exports
-│   │   └── mapStyles.js     # Dark theme map styling
+│   ├── styles/              # Styling
 │   └── utils/               # Utility functions
-│       ├── apiUtils.js      # API communication functions
-│       └── locationUtils.js # Location permission handling
 ├── backend/                 # FastAPI Python backend
-│   ├── main.py             # FastAPI server with weather endpoints
-│   ├── credentials.py      # NASA authentication management
-│   ├── nasa_data.py        # NASA OPeNDAP data access
-│   └── requirements.txt    # Python dependencies
-├── scripts/                 # Utility scripts
-│   ├── demo_weather_app.py # API testing and demonstration
-│   ├── setup_nasa_credentials.py # Credential setup helper
-│   ├── test_api.py         # API endpoint testing
-│   └── validate_api.py     # API validation scripts
-├── docs/                   # Documentation
-│   └── FINAL_SUMMARY.md    # Complete project documentation
 ├── WeatherApp.js           # Main React Native application
 ├── App.js                  # Expo app entry point
-└── package.json            # Node.js dependencies
+└── package.json            # Dependencies
 ```
-
-## 🚀 Quick Start
-
-### Prerequisites
-- Node.js 16+ and npm
-- Python 3.8+
-- NASA Earthdata account (free at https://urs.earthdata.nasa.gov/)
-- Expo CLI (`npm install -g expo-cli`)
-
-### 1. Clone and Install Dependencies
-
-```bash
-cd foretrip
-npm install
-pip install -r backend/requirements.txt
 ```
-
-### 2. Set Up NASA Credentials
-
-Create `.env` file in the root directory:
-```env
-NASA_USERNAME=your_earthdata_username
-NASA_PASSWORD=your_earthdata_password
-```
-
-Or run the setup script:
-```bash
-python scripts/setup_nasa_credentials.py
-```
-
-### 3. Start the Backend
-
-```bash
-cd backend
-python main.py
-```
-Backend will start on http://localhost:8001
-
-### 4. Start the Mobile App
-
-```bash
-npx expo start
-```
-Scan the QR code with Expo Go app on your phone.
-
-## 🔧 API Endpoints
 
 ### Weather Data
 ```
