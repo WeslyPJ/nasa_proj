@@ -23,17 +23,24 @@ const NASAMapView = forwardRef(({ region, onRegionChange, onPress, markers = [],
 
   // Handle long press to drop custom pins
   const handleLongPress = (event) => {
+    // Extract coordinate and create event object immediately to avoid synthetic event issues
     const { latitude, longitude } = event.nativeEvent.coordinate;
+    const coordinateEvent = {
+      nativeEvent: {
+        coordinate: { latitude, longitude }
+      }
+    };
+    
     setUserDroppedPin({ latitude, longitude });
     
     // Also trigger the onPress callback for weather data
-    onPress && onPress(event);
+    onPress && onPress(coordinateEvent);
     
     Alert.alert(
       '📍 Pin Dropped!',
       `Location: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
       [
-        { text: 'Get Weather', onPress: () => onPress && onPress(event) },
+        { text: 'Get Weather', onPress: () => onPress && onPress(coordinateEvent) },
         { text: 'Remove Pin', onPress: () => setUserDroppedPin(null) },
         { text: 'OK', style: 'cancel' }
       ]

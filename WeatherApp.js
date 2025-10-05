@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, StatusBar, Alert, TouchableOpacity, Text } from 'react-native';
-import { WeatherCard, LocationSearch, LoadingScreen, NASAMapView, CompactSearchBar, NetworkStatus } from './src/components';
+import { WeatherCard, LocationSearch, LoadingScreen, NASAMapView, CompactSearchBar, NetworkStatus, DatePicker, PlaceSearch } from './src/components';
 import { fetchWeatherData } from './src/utils/apiUtils';
 import { POPULAR_LOCATIONS, API_BASE_URL } from './src/constants';
 import { weatherStyles, fabStyles } from './src/styles';
@@ -24,6 +24,9 @@ const WeatherApp = () => {
   const [initializing, setInitializing] = useState(true);
   const [mapType, setMapType] = useState('satellite');
   const [delayStatus, setDelayStatus] = useState({ mapRegion: false, location: false });
+  const [lastLocationFetch, setLastLocationFetch] = useState(0);
+  const [selectedDate, setSelectedDate] = useState(null); // For date picker
+  const [showPlaceSearch, setShowPlaceSearch] = useState(false); // For place search modal
   const mapRef = useRef(null);
   const regionUpdateTimeoutRef = useRef(null);
   const lastWeatherFetchRef = useRef(null);
@@ -286,12 +289,24 @@ const WeatherApp = () => {
     await selectLocationAndFetchWeather(location.lat, location.lon, location.name, locationType, 1500);
   };
 
-  const handleFetchWeatherData = async (lat, lon, locationName) => {
+  const handleFetchWeatherData = async (lat, lon, locationName, forceUpdate = false) => {
+    // Implement 10-second throttling to prevent excessive API calls
+    const now = Date.now();
+    const timeSinceLastFetch = now - lastLocationFetch;
+    
+    if (!forceUpdate && timeSinceLastFetch < 10000) { // 10 seconds = 10000ms
+      console.log(`⏱️ Throttling: ${(10000 - timeSinceLastFetch) / 1000}s remaining before next fetch`);
+      return;
+    }
+    
+    setLastLocationFetch(now);
     setLoading(true);
     setError(null);
     try {
       console.log(`Fetching weather data for: ${locationName} (${lat}, ${lon})`);
-      const data = await fetchWeatherData(lat, lon, locationName);
+      
+      // Add date parameter if selected
+      const data = await fetchWeatherData(lat, lon, locationName, selectedDate);
       console.log('Weather data received:', data);
       
       // Add current time and date to weather data
@@ -335,6 +350,7 @@ const WeatherApp = () => {
   };
 
   const onMapPress = async (event) => {
+    // Extract coordinate immediately to avoid synthetic event issues
     const { latitude, longitude } = event.nativeEvent.coordinate;
     
     // Reset delay status
@@ -342,6 +358,26 @@ const WeatherApp = () => {
     
     // Auto-zoom to tapped location with immediate weather fetch
     await selectLocationAndFetchWeather(latitude, longitude, 'Custom Location', 'route', 1200);
+  };
+
+  const handlePlaceSelect = async (place) => {
+    try {
+      console.log('Place selected:', place);
+      
+      // Auto-zoom to selected place with immediate weather fetch
+      await selectLocationAndFetchWeather(
+        place.latitude, 
+        place.longitude, 
+        place.name || place.city, 
+        'locality', 
+        1200
+      );
+      
+      setShowPlaceSearch(false);
+    } catch (error) {
+      console.error('Error selecting place:', error);
+      Alert.alert('Error', 'Failed to select location. Please try again.');
+    }
   };
 
   const handleCurrentLocationPress = async () => {
@@ -490,10 +526,10 @@ const WeatherApp = () => {
               borderWidth: 1,
               borderColor: 'rgba(255, 230, 109, 0.5)',
             }}
-            onPress={() => setShowSearchBar(true)}
+            onPress={() => setShowPlaceSearch(true)}
           >
             <Text style={{ color: '#FFE66D', fontSize: 12, fontWeight: '600' }}>
-              🔍 Search
+              🔍 Places
             </Text>
           </TouchableOpacity>
 
@@ -515,6 +551,26 @@ const WeatherApp = () => {
           </TouchableOpacity>
         </View>
       )}
+      
+      {/* Date Picker for Forecast */}
+      <View style={{ 
+        position: 'absolute', 
+        top: 80, 
+        right: 20,
+        width: 140,
+      }}>
+        <DatePicker
+          selectedDate={selectedDate}
+          onDateChange={setSelectedDate}
+        />
+      </View>
+      
+      {/* Place Search Modal */}
+      <PlaceSearch
+        visible={showPlaceSearch}
+        onClose={() => setShowPlaceSearch(false)}
+        onPlaceSelect={handlePlaceSelect}
+      />
     </View>
   );
 };

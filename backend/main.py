@@ -19,9 +19,16 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="ForeTrip API", description="Clean weather API backend for ForeTrip")
 
 # Enable CORS for Expo app
+# Get allowed origins from environment variable, default to allow all for development
+ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', '*')
+if ALLOWED_ORIGINS == '*':
+    allow_origins = ["*"]
+else:
+    allow_origins = [origin.strip() for origin in ALLOWED_ORIGINS.split(',')]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=allow_origins,  # In production, replace with specific origins
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -40,29 +47,87 @@ async def health_check():
         "timestamp": datetime.now().isoformat()
     }
 
+@app.get("/geocode")
+async def geocode_location(q: str):
+    """
+    Convert place name to coordinates using Visual Crossing Geocoding API
+    """
+    try:
+        API_KEY = os.getenv('VISUAL_CROSSING_API_KEY', 'YOUR_API_KEY_HERE')
+        
+        if API_KEY == 'YOUR_API_KEY_HERE':
+            logger.warning("API key not configured, returning mock geocoding data")
+            return generate_mock_geocoding_data(q)
+        
+        # Visual Crossing geocoding endpoint
+        url = f"https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/{q}"
+        
+        params = {
+            'key': API_KEY,
+            'unitGroup': 'metric',
+            'include': 'current',
+            'elements': 'latitude,longitude,address,resolvedAddress'
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        # Format response to match expected frontend format
+                        results = [{
+                            "lat": data.get("latitude"),
+                            "lon": data.get("longitude"),
+                            "display_name": data.get("resolvedAddress", q),
+                            "name": q,
+                            "country": "Unknown"
+                        }]
+                        return {"results": results}
+                    else:
+                        logger.error(f"Geocoding API error: {response.status}")
+                        return generate_mock_geocoding_data(q)
+        except Exception as e:
+            logger.error(f"Geocoding request error: {e}")
+            return generate_mock_geocoding_data(q)
+            
+    except Exception as e:
+        logger.error(f"Error in geocoding: {e}")
+        return generate_mock_geocoding_data(q)
+
 @app.get("/weather")
-async def get_weather_data(lat: float, lon: float, location_name: str = "Unknown Location"):
+async def get_weather_data(
+    lat: float, 
+    lon: float, 
+    location_name: str = "Unknown Location",
+    date: str = None
+):
     """
     Get comprehensive weather data for a specific location using Visual Crossing Weather API format
+    Supports both current weather and historical/forecast data with date parameter
     """
     try:
         # Visual Crossing API key
         API_KEY = os.getenv('VISUAL_CROSSING_API_KEY', 'YOUR_API_KEY_HERE')
         
-        # Visual Crossing Weather API endpoint
-        url = f"https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/{lat},{lon}"
+        # Build Visual Crossing Weather API endpoint with optional date
+        if date:
+            # Format: YYYY-MM-DD for specific date, or date range YYYY-MM-DD/YYYY-MM-DD
+            url = f"https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/{lat},{lon}/{date}"
+        else:
+            # Current weather and 7-day forecast
+            url = f"https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/{lat},{lon}"
         
         params = {
             'key': API_KEY,
             'unitGroup': 'metric',  # Use metric units
             'include': 'current,days,hours',
-            'elements': 'datetime,temp,feelslike,humidity,precip,windspeed,winddir,cloudcover,uvindex,visibility,pressure,conditions,description'
+            'elements': 'datetime,temp,feelslike,humidity,precip,windspeed,winddir,cloudcover,uvindex,visibility,pressure,conditions,description,tempmax,tempmin'
         }
         
         # If API key is not configured, return mock data in Visual Crossing format
         if API_KEY == 'YOUR_API_KEY_HERE':
             logger.warning("Visual Crossing API key not configured, returning mock data")
-            return generate_mock_visual_crossing_data(lat, lon, location_name)
+            return generate_mock_visual_crossing_data(lat, lon, location_name, date)
         
         # Make request to Visual Crossing API
         try:
@@ -83,9 +148,51 @@ async def get_weather_data(lat: float, lon: float, location_name: str = "Unknown
                     
     except Exception as e:
         logger.error(f"Error fetching weather data: {e}")
-        return generate_mock_visual_crossing_data(lat, lon, location_name)
+        return generate_mock_visual_crossing_data(lat, lon, location_name, date)
 
-def generate_mock_visual_crossing_data(lat: float, lon: float, location_name: str):
+def generate_mock_geocoding_data(place_name: str):
+    """Generate mock geocoding data for testing"""
+    # Simple mock data based on common place names
+    mock_locations = {
+        "new york": {"lat": 40.7128, "lon": -74.0060, "address": "New York, NY, USA", "country": "United States"},
+        "london": {"lat": 51.5074, "lon": -0.1278, "address": "London, England, UK", "country": "United Kingdom"},
+        "paris": {"lat": 48.8566, "lon": 2.3522, "address": "Paris, France", "country": "France"},
+        "tokyo": {"lat": 35.6762, "lon": 139.6503, "address": "Tokyo, Japan", "country": "Japan"},
+        "sydney": {"lat": -33.8688, "lon": 151.2093, "address": "Sydney, NSW, Australia", "country": "Australia"},
+        "dubai": {"lat": 25.2048, "lon": 55.2708, "address": "Dubai, UAE", "country": "UAE"},
+        "mumbai": {"lat": 19.0760, "lon": 72.8777, "address": "Mumbai, Maharashtra, India", "country": "India"},
+        "los angeles": {"lat": 34.0522, "lon": -118.2437, "address": "Los Angeles, CA, USA", "country": "United States"},
+        "chicago": {"lat": 41.8781, "lon": -87.6298, "address": "Chicago, IL, USA", "country": "United States"},
+        "madrid": {"lat": 40.4168, "lon": -3.7038, "address": "Madrid, Spain", "country": "Spain"}
+    }
+    
+    place_lower = place_name.lower().strip()
+    results = []
+    
+    # Check for exact or partial matches
+    for key, data in mock_locations.items():
+        if key in place_lower or place_lower in key:
+            results.append({
+                "lat": data["lat"],
+                "lon": data["lon"], 
+                "display_name": data["address"],
+                "name": key.title(),
+                "country": data["country"]
+            })
+    
+    # If no matches found, return a default result
+    if not results:
+        results.append({
+            "lat": 40.7128,
+            "lon": -74.0060,
+            "display_name": f"Mock location for '{place_name}'",
+            "name": place_name,
+            "country": "Unknown"
+        })
+    
+    return {"results": results}
+
+def generate_mock_visual_crossing_data(lat: float, lon: float, location_name: str, date: str = None):
     """Generate realistic mock weather data in Visual Crossing format"""
     
     # Generate realistic temperature based on latitude and season
@@ -247,11 +354,19 @@ def get_weather_icon(conditions: str) -> str:
 
 if __name__ == "__main__":
     import uvicorn
+    
+    # Get configuration from environment variables
+    HOST = os.getenv('API_HOST', '0.0.0.0')
+    PORT = int(os.getenv('API_PORT', '8001'))
+    LOG_LEVEL = os.getenv('LOG_LEVEL', 'info')
+    
     print("🚀 Starting ForeTrip Weather API...")
-    print("📍 Server will be available at: http://localhost:8001")
-    print("📚 API Documentation: http://localhost:8001/docs")
+    print(f"📍 Server will be available at: http://{HOST}:{PORT}")
+    print(f"📚 API Documentation: http://{HOST}:{PORT}/docs")
+    print(f"🔧 Host: {HOST}, Port: {PORT}, Log Level: {LOG_LEVEL}")
+    
     try:
-        uvicorn.run(app, host="0.0.0.0", port=8001, log_level="info")
+        uvicorn.run(app, host=HOST, port=PORT, log_level=LOG_LEVEL)
     except Exception as e:
         print(f"❌ Error starting server: {e}")
         import traceback

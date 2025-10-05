@@ -7,12 +7,15 @@ import { API_BASE_URL } from '../constants';
  * @param {string} locationName - Name of the location
  * @returns {Promise<Object>} Weather data
  */
-export const fetchWeatherData = async (lat, lon, locationName, retryCount = 0) => {
+export const fetchWeatherData = async (lat, lon, locationName, date = null, retryCount = 0) => {
   const maxRetries = 3;
   const timeout = 10000; // 10 seconds
   
   try {
-    const url = `${API_BASE_URL}/weather?lat=${lat}&lon=${lon}&location_name=${encodeURIComponent(locationName)}`;
+    let url = `${API_BASE_URL}/weather?lat=${lat}&lon=${lon}&location_name=${encodeURIComponent(locationName)}`;
+    if (date) {
+      url += `&date=${date}`;
+    }
     console.log('Fetching weather from:', url);
     
     // Create timeout promise
@@ -161,6 +164,38 @@ const mapVisualCrossingCondition = (vcCondition) => {
     return 'fog';
   } else {
     return 'clear';
+  }
+};
+
+/**
+ * Search for places by name and get coordinates
+ * @param {string} placeName - Name of the place to search for
+ * @returns {Promise<Array>} Array of geocoding results
+ */
+export const searchPlaceByName = async (placeName) => {
+  try {
+    const url = `${API_BASE_URL}/geocode?q=${encodeURIComponent(placeName)}`;
+    console.log('Searching place:', url);
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const geocodeData = await response.json();
+    console.log('Geocoding results:', geocodeData);
+    
+    return geocodeData.results || [];
+  } catch (error) {
+    console.error('Place search failed:', error);
+    throw new Error(`Place search failed: ${error.message}`);
   }
 };
 

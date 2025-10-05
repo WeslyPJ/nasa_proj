@@ -6,3 +6,5 @@ export { default as NASAMapView } from './NASAMapView';
 export { default as NetworkStatus } from './NetworkStatus';
 export { default as NetworkManager } from './NetworkManager';
 export { default as AdvancedNetworkManager } from './AdvancedNetworkManager';
+export { default as DatePicker } from './DatePicker';
+export { default as PlaceSearch } from './PlaceSearch';
